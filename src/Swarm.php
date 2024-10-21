@@ -21,6 +21,7 @@ class Swarm
     private string $apikey;
     private SwarmUtils $utils;
     private Worker\Pool $pool;
+    private SwarmTools $swarmTools;
 
     /**
      * Swarm constructor.
@@ -34,6 +35,7 @@ class Swarm
         $this->client = \OpenAI::client($this->apikey);
         $this->utils = new SwarmUtils();
         $this->pool = $pool ?? Worker\pool();
+        $this->swarmTools = new SwarmTools($this->utils);
     }
 
     /**
@@ -66,7 +68,7 @@ class Swarm
         $initLen = count($messages);
 
         try {
-            while (count($history) - $initLen < $maxTurns && $activeAgent) {
+            while (count($history) - $initLen < $maxTurns) {
                 $response = $this->getChatCompletion(
                     $activeAgent,
                     $history,
@@ -164,24 +166,16 @@ class Swarm
 
             public function run(): Response
             {
-                try {
-                    return $this->swarm->run(
-                        $this->agent,
-                        $this->messages,
-                        $this->contextVariables,
-                        $this->modelOverride,
-                        $this->stream,
-                        $this->debug,
-                        $this->maxTurns,
-                        $this->executeTools
-                    );
-                } catch (NetworkException | FileOperationException $e) {
-                    // Re-throw these specific exceptions
-                    throw $e;
-                } catch (\Exception $e) {
-                    // Wrap other exceptions
-                    throw new \RuntimeException("An error occurred during the async conversation: " . $e->getMessage(), 0, $e);
-                }
+                return $this->swarm->run(
+                    $this->agent,
+                    $this->messages,
+                    $this->contextVariables,
+                    $this->modelOverride,
+                    $this->stream,
+                    $this->debug,
+                    $this->maxTurns,
+                    $this->executeTools
+                );
             }
         });
     }
@@ -308,5 +302,61 @@ class Swarm
         return $message;
     }
 
-    // ... (other methods remain unchanged)
+    /**
+     * Handle tool calls from the OpenAI API.
+     *
+     * @param array $toolCalls The tool calls to handle.
+     * @param Agent $agent The agent used for the tool calls.
+     * @param array $contextVariables Additional context variables.
+     * @param bool $debug Whether to print debug information.
+     * @return array The results of the tool calls.
+     */
+    private function handleToolCalls(array $toolCalls, Agent $agent, array $contextVariables, bool $debug): array
+    {
+        if ($agent->parallelToolCalls && count($toolCalls) > 1) {
+            return $this->handleParallelToolCalls($toolCalls, $agent, $contextVariables, $debug);
+        }
+        return $this->swarmTools->handleToolCalls($toolCalls, $agent, $contextVariables, $debug);
+    }
+
+    private function handleParallelToolCalls(array $toolCalls, Agent $agent, array $contextVariables, bool $debug): array
+    {
+        $futures = [];
+        foreach ($toolCalls as $toolCall) {
+            $futures[] = $this->pool->submit(new class($this->swarmTools, $toolCall, $agent, $contextVariables, $debug) implements Worker\Task {
+                public function __construct(
+                    private SwarmTools $swarmTools,
+                    private array $toolCall,
+                    private Agent $agent,
+                    private array $contextVariables,
+                    private bool $debug
+                ) {}
+
+                public function run()
+                {
+                    return $this->swarmTools->handleSingleToolCall($this->toolCall, $this->agent, $this->contextVariables, $this->debug);
+                }
+            });
+        }
+
+        $results = Future\await($futures);
+        
+        $messages = [];
+        $mergedContextVariables = $contextVariables;
+        $newAgent = null;
+
+        foreach ($results as $result) {
+            $messages = array_merge($messages, $result['messages']);
+            $mergedContextVariables = array_merge($mergedContextVariables, $result['contextVariables']);
+            if ($result['agent']) {
+                $newAgent = $result['agent'];
+            }
+        }
+
+        return [
+            'messages' => $messages,
+            'contextVariables' => $mergedContextVariables,
+            'agent' => $newAgent,
+        ];
+    }
 }

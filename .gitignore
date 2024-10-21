@@ -1,1 +1,68 @@
+# Composer dependencies
 /vendor/
+
+# PHPUnit
+.phpunit.result.cache
+
+# PHP-CS-Fixer
+.php-cs-fixer.cache
+
+# PhpStorm
+.idea/
+
+# Visual Studio Code
+.vscode/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Env files
+.env
+
+# Logs
+*.log
+
+# Cache files
+*.cache
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+
+# Compiled PHP files
+*.phar
+
+# Backup files
+*.bak
+*.backup
+
+# User-specific files
+*.user
+
+# Build output
+/build/
+
+# Composer lock file (uncomment if you want to ignore it)
+# composer.lock
+
+# Node modules (if using any JavaScript tools)
+/node_modules/
+
+# Coverage reports
+/coverage/
+
+# Other potential directories to ignore
+/storage/
+/public/storage
+/public/hot
+
+# Add any other project-specific files or directories to ignore
+psalm.xml

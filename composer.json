@@ -7,14 +7,20 @@
         "openai-php/client": "^0.10.2",
         "nyholm/psr7": "^1.8",
         "guzzlehttp/guzzle": "^7.9",
-        "amphp/parallel": "^1.4",
-        "vlucas/phpdotenv": "^5.6"
+        "amphp/parallel": "*",
+        "vlucas/phpdotenv": "^5.6",
+        "amphp/amp": "^2.6",
+        "revolt/event-loop": "^1.0",
+        "amphp/websocket-client": "^0.2.3",
+        "amphp/log": "^1.2",
+        "amphp/file": "^2.0"
     },
     "require-dev": {
         "phpunit/phpunit": "*",
         "vimeo/psalm": "*",
         "psalm/plugin-phpunit": "*",
-        "friendsofphp/php-cs-fixer": "*"
+        "friendsofphp/php-cs-fixer": "*",
+        "php-standard-library/psalm-plugin": "^2.3"
     },
     "autoload": {
         "psr-4": {
@@ -28,7 +34,10 @@
         }
     },
     "scripts": {
-        "test": "vendor/bin/phpunit"
+        "test": "vendor/bin/phpunit",
+        "test:coverage": "vendor/bin/phpunit --coverage-html coverage",
+        "test:unit": "vendor/bin/phpunit --testsuite=Unit",
+        "test:integration": "vendor/bin/phpunit --testsuite=Integration"
     },
     "authors": [
         {
