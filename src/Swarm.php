@@ -26,23 +26,24 @@ class Swarm
     private Worker\Pool $pool;
     private SwarmTools $swarmTools;
     private ?Logger $logger;
+    private bool $loggingEnabled = false;
 
     /**
      * Swarm constructor.
      *
      * @param string|null $apikey The OpenAI API key. If null, it will be fetched from the environment.
      * @param Worker\Pool|null $pool The worker pool to use. If null, a default pool will be created.
-     * @param bool $enableLogging Whether to enable logging.
      */
-    public function __construct(string $apikey = null, ?Worker\Pool $pool = null, bool $enableLogging = false)
+    public function __construct(string $apikey = null, ?Worker\Pool $pool = null)
     {
         $this->apikey = $apikey ?? getenv('OPENAI_API_KEY');
         $this->client = \OpenAI::client($this->apikey);
         $this->utils = new SwarmUtils();
         $this->pool = $pool ?? Worker\pool();
         $this->swarmTools = new SwarmTools($this->utils);
+        $this->loggingEnabled = getenv('LOGGING') === 'true';
         
-        if ($enableLogging) {
+        if ($this->loggingEnabled) {
             $this->logger = new Logger('swarm');
             $handler = new StreamHandler(STDOUT);
             $handler->setFormatter(new ConsoleFormatter);
