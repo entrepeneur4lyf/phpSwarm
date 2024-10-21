@@ -84,3 +84,13 @@ class SwarmUtils
         return 'string';
     }
 }
+
+
+class FileManager
+{
+  public static function root(int $levels = 1)
+  {
+    // Change the second parameter to suit your needs
+    return dirname(__FILE__, $levels);
+  }
+}

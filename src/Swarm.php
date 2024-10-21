@@ -32,22 +32,33 @@ class Swarm
      * Swarm constructor.
      *
      * @param string|null $apikey The OpenAI API key. If null, it will be fetched from the environment.
-     * @param Worker\Pool|null $pool The worker pool to use. If null, a default pool will be created.
      */
-    public function __construct(string $apikey = null, ?Worker\Pool $pool = null)
+    public function __construct(string $apikey = null)
     {
         $this->apikey = $apikey ?? getenv('OPENAI_API_KEY');
         $this->client = \OpenAI::client($this->apikey);
         $this->utils = new SwarmUtils();
-        $this->pool = $pool ?? Worker\pool();
+        $this->pool = Worker\pool();
         $this->swarmTools = new SwarmTools($this->utils);
         $this->loggingEnabled = getenv('LOGGING') === 'true';
         
         if ($this->loggingEnabled) {
             $this->logger = new Logger('swarm');
-            $handler = new StreamHandler(STDOUT);
-            $handler->setFormatter(new ConsoleFormatter);
-            $this->logger->pushHandler($handler);
+            if (getenv('LOG_DIR')) {
+                $project_root = FileManager::root();
+                if (is_dir($project_root.'/'.getenv('LOG_DIR'))) {
+                    mkdir($project_root.'/'.getenv('LOG_DIR').'/'.time().'/', 0755, true);
+                    $handler = new StreamHandler(File\openFile('swarm.log', 'w'));
+                    $handler->setFormatter(new ConsoleFormatter);
+                    $this->logger->pushHandler($handler);
+                }
+                else {
+                    throw new LogDirectoryException('Log directory path invalid');
+                }
+            }
+            else {
+                throw new LogDirectoryException('LOG_DIR option not set');
+            }
         } else {
             $this->logger = null;
         }
