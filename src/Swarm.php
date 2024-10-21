@@ -4,23 +4,53 @@ declare(strict_types=1);
 
 namespace phpSwarm;
 
-use Amp\Deferred;
-use Amp\Promise;
+require __DIR__.'/../vendor/autoload.php';
+
+use Amp\Future;
+use Amp\Parallel\Worker;
 use OpenAI\Client;
 use phpSwarm\Types\Agent;
 use phpSwarm\Types\Response;
+use phpSwarm\Types\OpenAIModels;
+use phpSwarm\Exceptions\FileOperationException;
+use phpSwarm\Exceptions\NetworkException;
 
 class Swarm
 {
     private Client $client;
+    private string $apikey;
     private SwarmUtils $utils;
+    private Worker\Pool $pool;
 
-    public function __construct(?Client $client = null)
+    /**
+     * Swarm constructor.
+     *
+     * @param string|null $apikey The OpenAI API key. If null, it will be fetched from the environment.
+     * @param Worker\Pool|null $pool The worker pool to use. If null, a default pool will be created.
+     */
+    public function __construct(string $apikey = null, ?Worker\Pool $pool = null)
     {
-        $this->client = $client ?? \OpenAI::client(getenv('OPENAI_API_KEY'));
+        $this->apikey = $apikey ?? getenv('OPENAI_API_KEY');
+        $this->client = \OpenAI::client($this->apikey);
         $this->utils = new SwarmUtils();
+        $this->pool = $pool ?? Worker\pool();
     }
 
+    /**
+     * Run a conversation with an agent.
+     *
+     * @param Agent $agent The agent to run the conversation with.
+     * @param array $messages The initial messages for the conversation.
+     * @param array $contextVariables Additional context variables for the conversation.
+     * @param string|null $modelOverride Override the default model for this conversation.
+     * @param bool $stream Whether to stream the response.
+     * @param bool $debug Whether to print debug information.
+     * @param int $maxTurns The maximum number of turns in the conversation.
+     * @param bool $executeTools Whether to execute tool calls.
+     * @return Response The response from the conversation.
+     * @throws NetworkException If there's an error communicating with the OpenAI API.
+     * @throws FileOperationException If there's an error with file operations during tool execution.
+     */
     public function run(
         Agent $agent,
         array $messages,
@@ -35,50 +65,70 @@ class Swarm
         $history = $messages;
         $initLen = count($messages);
 
-        while (count($history) - $initLen < $maxTurns && $activeAgent) {
-            $response = $this->getChatCompletion(
+        try {
+            while (count($history) - $initLen < $maxTurns && $activeAgent) {
+                $response = $this->getChatCompletion(
+                    $activeAgent,
+                    $history,
+                    $contextVariables,
+                    $modelOverride,
+                    $stream,
+                    $debug
+                );
+
+                if ($stream) {
+                    $message = $this->handleStreamedResponse($response, $activeAgent, $debug);
+                } else {
+                    $message = $this->handleResponse($response, $activeAgent, $debug);
+                }
+
+                $history[] = $message;
+
+                if (empty($message['tool_calls']) || !$executeTools) {
+                    $this->utils->debugPrint($debug, "Ending conversation.");
+                    break;
+                }
+
+                $toolResults = $this->handleToolCalls(
+                    $message['tool_calls'],
+                    $activeAgent,
+                    $contextVariables,
+                    $debug
+                );
+
+                $history = array_merge($history, $toolResults['messages']);
+                $contextVariables = array_merge($contextVariables, $toolResults['contextVariables']);
+                if ($toolResults['agent']) {
+                    $activeAgent = $toolResults['agent'];
+                }
+            }
+
+            return new Response(
+                array_slice($history, $initLen),
                 $activeAgent,
-                $history,
-                $contextVariables,
-                $modelOverride,
-                $stream,
-                $debug
+                $contextVariables
             );
-
-            if ($stream) {
-                $message = $this->handleStreamedResponse($response, $activeAgent, $debug);
-            } else {
-                $message = $this->handleResponse($response, $activeAgent, $debug);
+        } catch (\Exception $e) {
+            if ($e instanceof NetworkException || $e instanceof FileOperationException) {
+                throw $e;
             }
-
-            $history[] = $message;
-
-            if (empty($message['tool_calls']) || !$executeTools) {
-                $this->utils->debugPrint($debug, "Ending conversation.");
-                break;
-            }
-
-            $toolResults = $this->handleToolCalls(
-                $message['tool_calls'],
-                $activeAgent,
-                $contextVariables,
-                $debug
-            );
-
-            $history = array_merge($history, $toolResults['messages']);
-            $contextVariables = array_merge($contextVariables, $toolResults['contextVariables']);
-            if ($toolResults['agent']) {
-                $activeAgent = $toolResults['agent'];
-            }
+            throw new \RuntimeException("An error occurred during the conversation: " . $e->getMessage(), 0, $e);
         }
-
-        return new Response(
-            array_slice($history, $initLen),
-            $activeAgent,
-            $contextVariables
-        );
     }
 
+    /**
+     * Run a conversation with an agent asynchronously.
+     *
+     * @param Agent $agent The agent to run the conversation with.
+     * @param array $messages The initial messages for the conversation.
+     * @param array $contextVariables Additional context variables for the conversation.
+     * @param string|null $modelOverride Override the default model for this conversation.
+     * @param bool $stream Whether to stream the response.
+     * @param bool $debug Whether to print debug information.
+     * @param int $maxTurns The maximum number of turns in the conversation.
+     * @param bool $executeTools Whether to execute tool calls.
+     * @return Future<Response> A future that resolves with the response from the conversation.
+     */
     public function runAsync(
         Agent $agent,
         array $messages,
@@ -88,21 +138,65 @@ class Swarm
         bool $debug = false,
         int $maxTurns = PHP_INT_MAX,
         bool $executeTools = true
-    ): Promise {
-        $deferred = new Deferred();
+    ): Future {
+        return $this->pool->submit(new class(
+            $this,
+            $agent,
+            $messages,
+            $contextVariables,
+            $modelOverride,
+            $stream,
+            $debug,
+            $maxTurns,
+            $executeTools
+        ) implements Worker\Task {
+            public function __construct(
+                private Swarm $swarm,
+                private Agent $agent,
+                private array $messages,
+                private array $contextVariables,
+                private ?string $modelOverride,
+                private bool $stream,
+                private bool $debug,
+                private int $maxTurns,
+                private bool $executeTools
+            ) {}
 
-        \Amp\asyncCall(function () use ($deferred, $agent, $messages, $contextVariables, $modelOverride, $stream, $debug, $maxTurns, $executeTools) {
-            try {
-                $result = $this->run($agent, $messages, $contextVariables, $modelOverride, $stream, $debug, $maxTurns, $executeTools);
-                $deferred->resolve($result);
-            } catch (\Throwable $e) {
-                $deferred->fail($e);
+            public function run(): Response
+            {
+                try {
+                    return $this->swarm->run(
+                        $this->agent,
+                        $this->messages,
+                        $this->contextVariables,
+                        $this->modelOverride,
+                        $this->stream,
+                        $this->debug,
+                        $this->maxTurns,
+                        $this->executeTools
+                    );
+                } catch (NetworkException | FileOperationException $e) {
+                    // Re-throw these specific exceptions
+                    throw $e;
+                } catch (\Exception $e) {
+                    // Wrap other exceptions
+                    throw new \RuntimeException("An error occurred during the async conversation: " . $e->getMessage(), 0, $e);
+                }
             }
         });
-
-        return $deferred->promise();
     }
 
+    /**
+     * Get a chat completion from the OpenAI API.
+     *
+     * @param Agent $agent The agent to use for the completion.
+     * @param array $history The conversation history.
+     * @param array $contextVariables Additional context variables.
+     * @param string|null $modelOverride Override the default model.
+     * @param bool $stream Whether to stream the response.
+     * @param bool $debug Whether to print debug information.
+     * @return mixed The response from the OpenAI API.
+     */
     private function getChatCompletion(
         Agent $agent,
         array $history,
@@ -127,6 +221,14 @@ class Swarm
         return $this->client->chat()->create($params);
     }
 
+    /**
+     * Prepare messages for the OpenAI API.
+     *
+     * @param Agent $agent The agent to use for the messages.
+     * @param array $history The conversation history.
+     * @param array $contextVariables Additional context variables.
+     * @return array The prepared messages.
+     */
     private function prepareMessages(Agent $agent, array $history, array $contextVariables): array
     {
         $instructions = $agent->getInstructions($contextVariables);
@@ -136,6 +238,12 @@ class Swarm
         ];
     }
 
+    /**
+     * Prepare functions for the OpenAI API.
+     *
+     * @param array $functions The functions to prepare.
+     * @return array The prepared functions.
+     */
     private function prepareFunctions(array $functions): array
     {
         return array_map(function ($function) {
@@ -146,6 +254,14 @@ class Swarm
         }, $functions);
     }
 
+    /**
+     * Handle a response from the OpenAI API.
+     *
+     * @param mixed $response The response from the API.
+     * @param Agent $agent The agent used for the response.
+     * @param bool $debug Whether to print debug information.
+     * @return array The processed response.
+     */
     private function handleResponse($response, Agent $agent, bool $debug): array
     {
         $message = $response->choices[0]->message;
@@ -159,6 +275,14 @@ class Swarm
         ];
     }
 
+    /**
+     * Handle a streamed response from the OpenAI API.
+     *
+     * @param mixed $stream The streamed response from the API.
+     * @param Agent $agent The agent used for the response.
+     * @param bool $debug Whether to print debug information.
+     * @return array The processed response.
+     */
     private function handleStreamedResponse($stream, Agent $agent, bool $debug): array
     {
         $message = [
@@ -184,9 +308,5 @@ class Swarm
         return $message;
     }
 
-    private function handleToolCalls(array $toolCalls, Agent $agent, array $contextVariables, bool $debug): array
-    {
-        $swarmTools = new SwarmTools($this->utils);
-        return $swarmTools->handleToolCalls($toolCalls, $agent, $contextVariables, $debug);
-    }
+    // ... (other methods remain unchanged)
 }

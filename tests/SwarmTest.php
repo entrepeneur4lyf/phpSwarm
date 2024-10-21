@@ -13,7 +13,7 @@ use OpenAI\Client;
 use OpenAI\Responses\Chat\CreateResponse;
 use OpenAI\Responses\Chat\CreateResponseChoice;
 use OpenAI\Responses\Chat\CreateResponseMessage;
-use Amp\Success;
+use Amp\Future;
 
 class SwarmTest extends TestCase
 {
@@ -136,22 +136,17 @@ class SwarmTest extends TestCase
         );
 
         // Run an async conversation
-        $promise = $swarm->runAsync(
+        $future = $swarm->runAsync(
             agent: $agent,
             messages: [
                 ['role' => 'user', 'content' => "Hello!"]
             ]
         );
 
-        // Assert that the promise resolves to the expected response
-        $promise->onResolve(function ($error, $response) {
-            $this->assertNull($error);
-            $this->assertCount(1, $response->messages);
-            $this->assertEquals('assistant', $response->messages[0]['role']);
-            $this->assertEquals('Hello! How can I assist you today?', $response->messages[0]['content']);
-        });
-
-        // Run the event loop to process the promise
-        \Amp\Loop::run();
+        // Assert that the future resolves to the expected response
+        $response = $future->await();
+        $this->assertCount(1, $response->messages);
+        $this->assertEquals('assistant', $response->messages[0]['role']);
+        $this->assertEquals('Hello! How can I assist you today?', $response->messages[0]['content']);
     }
 }

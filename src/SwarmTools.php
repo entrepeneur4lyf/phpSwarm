@@ -6,22 +6,42 @@ namespace phpSwarm;
 
 use phpSwarm\Types\Agent;
 use phpSwarm\Types\Result;
+use phpSwarm\Types\OpenAIModels;
+use phpSwarm\Exceptions\FileOperationException;
+use phpSwarm\Exceptions\NetworkException;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 
+/**
+ * Class SwarmTools
+ * 
+ * This class provides various utility functions for file operations and network requests.
+ */
 class SwarmTools
 {
     private SwarmUtils $utils;
-    private array $config;
     private Client $httpClient;
 
+    /**
+     * SwarmTools constructor.
+     *
+     * @param SwarmUtils $utils Utility class for Swarm operations
+     */
     public function __construct(SwarmUtils $utils)
     {
         $this->utils = $utils;
-        $this->config = require __DIR__ . '/config.php';
         $this->httpClient = new Client();
     }
 
+    /**
+     * Handle tool calls for an agent.
+     *
+     * @param array $toolCalls Array of tool calls
+     * @param Agent $agent The agent making the tool calls
+     * @param array $contextVariables Context variables for the agent
+     * @param bool $debug Whether to print debug information
+     * @return array Results of the tool calls
+     */
     public function handleToolCalls(array $toolCalls, Agent $agent, array $contextVariables, bool $debug): array
     {
         $results = [
@@ -42,6 +62,15 @@ class SwarmTools
         return $results;
     }
 
+    /**
+     * Handle a single tool call.
+     *
+     * @param object $toolCall The tool call object
+     * @param array $functions Available functions
+     * @param array $contextVariables Context variables
+     * @param bool $debug Whether to print debug information
+     * @return array Result of the tool call
+     */
     public function handleSingleToolCall($toolCall, $functions, $contextVariables, bool $debug): array
     {
         $functionMap = [
@@ -83,6 +112,14 @@ class SwarmTools
         ];
     }
 
+    /**
+     * Handle the result of a function call.
+     *
+     * @param mixed $result The raw result of the function call
+     * @param bool $debug Whether to print debug information
+     * @return Result The processed result
+     * @throws \TypeError If the result cannot be cast to a string
+     */
     private function handleFunctionResult($result, bool $debug): Result
     {
         if ($result instanceof Result) {
@@ -106,45 +143,81 @@ class SwarmTools
         }
     }
 
+    /**
+     * List files in a directory.
+     *
+     * @param string $directoryPath Path to the directory
+     * @return string JSON encoded list of files
+     * @throws FileOperationException If the directory is not found or cannot be read
+     */
     public function listFiles(string $directoryPath): string
     {
         if (!is_dir($directoryPath)) {
-            return "Error: Directory not found.";
+            throw new FileOperationException("Directory not found: $directoryPath");
         }
 
         $files = scandir($directoryPath);
+        if ($files === false) {
+            throw new FileOperationException("Unable to read directory: $directoryPath");
+        }
+
         $files = array_diff($files, array('.', '..'));
         return json_encode($files);
     }
 
+    /**
+     * Read the contents of a file.
+     *
+     * @param string $filePath Path to the file
+     * @return string Contents of the file
+     * @throws FileOperationException If the file is not found or cannot be read
+     */
     public function readFile(string $filePath): string
     {
         if (!file_exists($filePath)) {
-            return "Error: File not found.";
+            throw new FileOperationException("File not found: $filePath");
         }
 
         $content = file_get_contents($filePath);
         if ($content === false) {
-            return "Error: Unable to read file.";
+            throw new FileOperationException("Unable to read file: $filePath");
         }
 
         return $content;
     }
 
+    /**
+     * Write content to a file.
+     *
+     * @param string $filePath Path to the file
+     * @param string $content Content to write
+     * @param bool $overwriteFile Whether to overwrite an existing file
+     * @return string Success message
+     * @throws FileOperationException If the file cannot be written
+     */
     public function writeFile(string $filePath, string $content, bool $overwriteFile = false): string
     {
         if (file_exists($filePath) && !$overwriteFile) {
-            return "Error: File already exists and overwrite is not allowed.";
+            throw new FileOperationException("File already exists and overwrite is not allowed: $filePath");
         }
 
         $result = file_put_contents($filePath, $content);
         if ($result === false) {
-            return "Error: Unable to write to file.";
+            throw new FileOperationException("Unable to write to file: $filePath");
         }
 
         return "File written successfully.";
     }
 
+    /**
+     * Retrieve a document from a URL and optionally save it.
+     *
+     * @param string $url URL of the document
+     * @param string|null $savePath Path to save the document (optional)
+     * @return string Content of the document or success message if saved
+     * @throws NetworkException If the document cannot be retrieved
+     * @throws FileOperationException If the document cannot be saved
+     */
     public function retrieveDocumentFromURL(string $url, ?string $savePath = null): string
     {
         try {
@@ -153,13 +226,14 @@ class SwarmTools
 
             if ($savePath) {
                 $extension = pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION);
-                if (!in_array($extension, $this->config['allowed_extensions'])) {
-                    return "Error: File extension not allowed.";
+                $allowedExtensions = explode(',', $_ENV['ALLOWED_EXTENSIONS'] ?? 'txt,pdf,doc,docx,csv');
+                if (!in_array($extension, $allowedExtensions)) {
+                    throw new FileOperationException("File extension not allowed: $extension");
                 }
 
                 $filePath = $savePath . '/' . basename($url);
                 if (file_put_contents($filePath, $content) === false) {
-                    return "Error: Unable to save file.";
+                    throw new FileOperationException("Unable to save file: $filePath");
                 }
 
                 return "File downloaded and saved successfully at: " . $filePath;
@@ -167,7 +241,7 @@ class SwarmTools
 
             return $content;
         } catch (GuzzleException $e) {
-            return "Error: Unable to retrieve document from URL. " . $e->getMessage();
+            throw new NetworkException("Unable to retrieve document from URL: " . $e->getMessage());
         }
     }
 }

@@ -4,8 +4,19 @@ declare(strict_types=1);
 
 namespace phpSwarm;
 
+/**
+ * SwarmUtils class provides utility functions for the phpSwarm library.
+ */
 class SwarmUtils
 {
+    /**
+     * Prints debug information if debug mode is enabled.
+     *
+     * @param bool $debug Whether debug mode is enabled
+     * @param string $message The message to print
+     * @param mixed $data Additional data to print (optional)
+     * @return void
+     */
     public function debugPrint(bool $debug, string $message, $data = null): void
     {
         if (!$debug) {
@@ -16,6 +27,12 @@ class SwarmUtils
         echo "[$timestamp] $message $dataString\n";
     }
 
+    /**
+     * Converts a PHP function to a JSON representation compatible with OpenAI's function calling format.
+     *
+     * @param callable $function The function to convert
+     * @return array The JSON representation of the function
+     */
     public function functionToJson($function): array
     {
         $reflection = new \ReflectionFunction($function);
@@ -43,6 +60,12 @@ class SwarmUtils
         ];
     }
 
+    /**
+     * Converts a PHP type to a string representation compatible with OpenAI's function calling format.
+     *
+     * @param \ReflectionType $type The type to convert
+     * @return string The string representation of the type
+     */
     private function getTypeString(\ReflectionType $type): string
     {
         if ($type instanceof \ReflectionNamedType) {

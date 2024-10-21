@@ -4,9 +4,8 @@ phpSwarm is a PHP framework for building multi-agent systems using OpenAI's GPT 
 
 ## Requirements
 
-- PHP 8.1 or higher
+- PHP 8.1+
 - Composer
-- OpenAI API key
 
 ## Installation
 
@@ -21,16 +20,16 @@ phpSwarm is a PHP framework for building multi-agent systems using OpenAI's GPT 
    composer install
    ```
 
-3. Set up your OpenAI API key:
+3. Copy the `.env.example` file to `.env` and update the values:
    ```
-   export OPENAI_API_KEY=your_api_key_here
+   cp .env.example .env
    ```
+
+4. Update the `.env` file with your OpenAI API key and other configuration options.
 
 ## Usage
 
-### Synchronous Usage
-
-Here's a basic example of how to use phpSwarm synchronously:
+Here's a basic example of how to use phpSwarm:
 
 ```php
 <?php
@@ -39,11 +38,50 @@ require 'vendor/autoload.php';
 
 use phpSwarm\Swarm;
 use phpSwarm\Types\Agent;
+use phpSwarm\Types\OpenAIModels;
 
-// Initialize the Swarm client
 $swarm = new Swarm();
 
-// Create an agent
+$agent = new Agent(
+    name: "FileBot",
+    model: OpenAIModels::GPT_4,
+    instructions: "You are a helpful assistant that can work with files and URLs.",
+    functions: [
+        'listFiles',
+        'readFile',
+        'writeFile',
+        'retrieveDocumentFromURL'
+    ]
+);
+
+$response = $swarm->run(
+    agent: $agent,
+    messages: [
+        ['role' => 'user', 'content' => "List the files in the current directory."]
+    ],
+    debug: true
+);
+
+foreach ($response->messages as $message) {
+    echo "{$message['role']}: {$message['content']}\n";
+}
+```
+
+### Asynchronous Usage
+
+phpSwarm supports asynchronous operations using amphp/Parallel. Here's how to use it asynchronously:
+
+```php
+<?php
+
+require 'vendor/autoload.php';
+
+use Amp\Future;
+use phpSwarm\Swarm;
+use phpSwarm\Types\Agent;
+
+$swarm = new Swarm();
+
 $agent = new Agent(
     name: "FileBot",
     model: "gpt-3.5-turbo",
@@ -56,63 +94,19 @@ $agent = new Agent(
     ]
 );
 
-// Run a conversation
-$response = $swarm->run(
+$future = $swarm->runAsync(
     agent: $agent,
     messages: [
-        ['role' => 'user', 'content' => "List the files in the current directory."]
+        ['role' => 'user', 'content' => "Read the contents of 'example.txt'."]
     ],
     debug: true
 );
 
-// Print the conversation
+$response = $future->await();
+
 foreach ($response->messages as $message) {
     echo "{$message['role']}: {$message['content']}\n";
 }
-```
-
-### Asynchronous Usage
-
-phpSwarm also supports asynchronous operations using amphp. Here's how to use it asynchronously:
-
-```php
-<?php
-
-require 'vendor/autoload.php';
-
-use Amp\Loop;
-use phpSwarm\Swarm;
-use phpSwarm\Types\Agent;
-
-Loop::run(function () {
-    $swarm = new Swarm();
-
-    $agent = new Agent(
-        name: "FileBot",
-        model: "gpt-3.5-turbo",
-        instructions: "You are a helpful assistant that can work with files and URLs.",
-        functions: [
-            'listFiles',
-            'readFile',
-            'writeFile',
-            'retrieveDocumentFromURL'
-        ]
-    );
-
-    $promise = $swarm->runAsync(
-        agent: $agent,
-        messages: [
-            ['role' => 'user', 'content' => "Read the contents of 'example.txt'."]
-        ],
-        debug: true
-    );
-
-    $response = yield $promise;
-
-    foreach ($response->messages as $message) {
-        echo "{$message['role']}: {$message['content']}\n";
-    }
-});
 ```
 
 ## Features
@@ -122,20 +116,11 @@ Loop::run(function () {
 - Streaming support for real-time responses
 - Tool calling capabilities for extending agent functionality
 - Debug mode for detailed logging
-- Asynchronous operations support using amphp
+- Asynchronous operations support using amphp/parallel
 
-### Built-in Tool Functions
+## Development
 
-phpSwarm comes with several built-in tool functions that agents can use:
-
-1. `listFiles(string $directoryPath)`: Lists all files in the specified directory.
-2. `readFile(string $filePath)`: Reads and returns the contents of the specified file.
-3. `writeFile(string $filePath, string $content, bool $overwriteFile = false)`: Writes content to the specified file. If the file exists, it will only overwrite if $overwriteFile is true.
-4. `retrieveDocumentFromURL(string $url)`: Retrieves and returns the content from the specified URL.
-
-These functions can be used by specifying them in the `functions` array when creating an Agent.
-
-## Running Tests
+### Running Tests
 
 To run the test suite, use the following command:
 
@@ -143,7 +128,21 @@ To run the test suite, use the following command:
 composer test
 ```
 
-This will run all the tests in the `tests` directory using PHPUnit.
+### Static Analysis
+
+This project uses Psalm for static analysis. To run Psalm, use:
+
+```
+./vendor/bin/psalm
+```
+
+### Code Styling
+
+To fix code style issues, run:
+
+```
+./vendor/bin/php-cs-fixer fix
+```
 
 ## Contributing
 
@@ -157,4 +156,3 @@ This project is licensed under the MIT License. See the `LICENSE` file for detai
 
 - OpenAI for providing the GPT models and API
 - The PHP community for their excellent tools and libraries
-- amphp for asynchronous programming support
