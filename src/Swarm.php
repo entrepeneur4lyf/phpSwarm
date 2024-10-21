@@ -8,6 +8,9 @@ require __DIR__.'/../vendor/autoload.php';
 
 use Amp\Future;
 use Amp\Parallel\Worker;
+use Amp\Log\ConsoleFormatter;
+use Amp\Log\StreamHandler;
+use Monolog\Logger;
 use OpenAI\Client;
 use phpSwarm\Types\Agent;
 use phpSwarm\Types\Response;
@@ -22,20 +25,31 @@ class Swarm
     private SwarmUtils $utils;
     private Worker\Pool $pool;
     private SwarmTools $swarmTools;
+    private ?Logger $logger;
 
     /**
      * Swarm constructor.
      *
      * @param string|null $apikey The OpenAI API key. If null, it will be fetched from the environment.
      * @param Worker\Pool|null $pool The worker pool to use. If null, a default pool will be created.
+     * @param bool $enableLogging Whether to enable logging.
      */
-    public function __construct(string $apikey = null, ?Worker\Pool $pool = null)
+    public function __construct(string $apikey = null, ?Worker\Pool $pool = null, bool $enableLogging = false)
     {
         $this->apikey = $apikey ?? getenv('OPENAI_API_KEY');
         $this->client = \OpenAI::client($this->apikey);
         $this->utils = new SwarmUtils();
         $this->pool = $pool ?? Worker\pool();
         $this->swarmTools = new SwarmTools($this->utils);
+        
+        if ($enableLogging) {
+            $this->logger = new Logger('swarm');
+            $handler = new StreamHandler(STDOUT);
+            $handler->setFormatter(new ConsoleFormatter);
+            $this->logger->pushHandler($handler);
+        } else {
+            $this->logger = null;
+        }
     }
 
     /**
@@ -67,6 +81,8 @@ class Swarm
         $history = $messages;
         $initLen = count($messages);
 
+        $this->log('info', 'Starting conversation', ['agent' => $agent->name, 'maxTurns' => $maxTurns]);
+
         try {
             while (count($history) - $initLen < $maxTurns) {
                 $response = $this->getChatCompletion(
@@ -87,6 +103,7 @@ class Swarm
                 $history[] = $message;
 
                 if (empty($message['tool_calls']) || !$executeTools) {
+                    $this->log('info', 'Ending conversation', ['reason' => empty($message['tool_calls']) ? 'No tool calls' : 'Tools execution disabled']);
                     $this->utils->debugPrint($debug, "Ending conversation.");
                     break;
                 }
@@ -102,8 +119,11 @@ class Swarm
                 $contextVariables = array_merge($contextVariables, $toolResults['contextVariables']);
                 if ($toolResults['agent']) {
                     $activeAgent = $toolResults['agent'];
+                    $this->log('info', 'Agent changed', ['newAgent' => $activeAgent->name]);
                 }
             }
+
+            $this->log('info', 'Conversation completed', ['turns' => count($history) - $initLen]);
 
             return new Response(
                 array_slice($history, $initLen),
@@ -111,6 +131,7 @@ class Swarm
                 $contextVariables
             );
         } catch (\Exception $e) {
+            $this->log('error', 'Error during conversation', ['error' => $e->getMessage()]);
             if ($e instanceof NetworkException || $e instanceof FileOperationException) {
                 throw $e;
             }
@@ -313,14 +334,32 @@ class Swarm
      */
     private function handleToolCalls(array $toolCalls, Agent $agent, array $contextVariables, bool $debug): array
     {
+        $this->log('info', 'Handling tool calls', ['count' => count($toolCalls)]);
         if ($agent->parallelToolCalls && count($toolCalls) > 1) {
             return $this->handleParallelToolCalls($toolCalls, $agent, $contextVariables, $debug);
         }
         return $this->swarmTools->handleToolCalls($toolCalls, $agent, $contextVariables, $debug);
     }
 
+    /**
+     * Handle parallel tool calls from the OpenAI API.
+     *
+     * This method processes multiple tool calls concurrently using the worker pool.
+     *
+     * @param array $toolCalls The list of tool calls to process.
+     * @param Agent $agent The agent used for the tool calls.
+     * @param array $contextVariables Additional context variables.
+     * @param bool $debug Whether to print debug information.
+     *
+     * @return array An associative array containing:
+     *               - 'messages': Array of messages resulting from tool calls.
+     *               - 'contextVariables': Updated context variables.
+     *               - 'agent': New agent instance if any changes were made.
+     */
     private function handleParallelToolCalls(array $toolCalls, Agent $agent, array $contextVariables, bool $debug): array
     {
+        $this->log('info', 'Handling parallel tool calls', ['count' => count($toolCalls)]);
+
         $futures = [];
         foreach ($toolCalls as $toolCall) {
             $futures[] = $this->pool->submit(new class($this->swarmTools, $toolCall, $agent, $contextVariables, $debug) implements Worker\Task {
@@ -353,10 +392,26 @@ class Swarm
             }
         }
 
+        $this->log('info', 'Parallel tool calls completed', ['messageCount' => count($messages)]);
+
         return [
             'messages' => $messages,
             'contextVariables' => $mergedContextVariables,
             'agent' => $newAgent,
         ];
+    }
+
+    /**
+     * Log a message if logging is enabled.
+     *
+     * @param string $level The log level.
+     * @param string $message The message to log.
+     * @param array $context Additional context for the log message.
+     */
+    private function log(string $level, string $message, array $context = []): void
+    {
+        if ($this->logger) {
+            $this->logger->$level($message, $context);
+        }
     }
 }
