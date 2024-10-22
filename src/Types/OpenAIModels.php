@@ -6,7 +6,7 @@ namespace phpSwarm\Types;
 
 /**
  * Enum OpenAIModels
- * 
+ *
  * Represents the various OpenAI models available for use in the Swarm system.
  */
 enum OpenAIModels
@@ -23,7 +23,7 @@ enum OpenAIModels
     case TTS;
     case TTSHD;
     case OMOD;
-    
+
     /**
      * Get the string representation of the OpenAI model.
      *
@@ -31,8 +31,7 @@ enum OpenAIModels
      */
     public function model(): string
     {
-        return match($this) 
-        {
+        return match($this) {
             OpenAIModels::GPT4O => 'gpt-4o',
             OpenAIModels::GPT40MINI => 'gpt-4o-mini',
             OpenAIModels::GPT4RTP => 'gpt-4o-realtime-preview',

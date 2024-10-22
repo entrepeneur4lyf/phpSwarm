@@ -10,13 +10,14 @@ use Amp\Future;
 use Amp\Parallel\Worker;
 use Amp\Log\ConsoleFormatter;
 use Amp\Log\StreamHandler;
-use Monolog\Logger;
+use Amp\File;
 use OpenAI\Client;
 use phpSwarm\Types\Agent;
 use phpSwarm\Types\Response;
 use phpSwarm\Types\OpenAIModels;
 use phpSwarm\Exceptions\FileOperationException;
 use phpSwarm\Exceptions\NetworkException;
+use phpSwarm\Exceptions\LogDirectoryException;
 
 class Swarm
 {
@@ -41,24 +42,9 @@ class Swarm
         $this->pool = Worker\pool();
         $this->swarmTools = new SwarmTools($this->utils);
         $this->loggingEnabled = getenv('LOGGING') === 'true';
-        
+
         if ($this->loggingEnabled) {
-            $this->logger = new Logger('swarm');
-            if (getenv('LOG_DIR')) {
-                $project_root = FileManager::root();
-                if (is_dir($project_root.'/'.getenv('LOG_DIR'))) {
-                    mkdir($project_root.'/'.getenv('LOG_DIR').'/'.time().'/', 0755, true);
-                    $handler = new StreamHandler(File\openFile('swarm.log', 'w'));
-                    $handler->setFormatter(new ConsoleFormatter);
-                    $this->logger->pushHandler($handler);
-                }
-                else {
-                    throw new LogDirectoryException('Log directory path invalid');
-                }
-            }
-            else {
-                throw new LogDirectoryException('LOG_DIR option not set');
-            }
+            $this->setupLogger();
         } else {
             $this->logger = null;
         }
@@ -174,7 +160,7 @@ class Swarm
         int $maxTurns = PHP_INT_MAX,
         bool $executeTools = true
     ): Future {
-        return $this->pool->submit(new class(
+        return $this->pool->submit(new class (
             $this,
             $agent,
             $messages,
@@ -195,7 +181,8 @@ class Swarm
                 private bool $debug,
                 private int $maxTurns,
                 private bool $executeTools
-            ) {}
+            ) {
+            }
 
             public function run(): Response
             {
@@ -231,7 +218,7 @@ class Swarm
         ?string $modelOverride,
         bool $stream,
         bool $debug
-    ) {
+    ) : mixed {
         $messages = $this->prepareMessages($agent, $history, $contextVariables);
         $this->utils->debugPrint($debug, "Getting chat completion for:", $messages);
 
@@ -293,7 +280,7 @@ class Swarm
     {
         $message = $response->choices[0]->message;
         $this->utils->debugPrint($debug, "Received completion:", $message);
-        
+
         return [
             'role' => $message->role,
             'content' => $message->content,
@@ -374,14 +361,15 @@ class Swarm
 
         $futures = [];
         foreach ($toolCalls as $toolCall) {
-            $futures[] = $this->pool->submit(new class($this->swarmTools, $toolCall, $agent, $contextVariables, $debug) implements Worker\Task {
+            $futures[] = $this->pool->submit(new class ($this->swarmTools, $toolCall, $agent, $contextVariables, $debug) implements Worker\Task {
                 public function __construct(
                     private SwarmTools $swarmTools,
                     private array $toolCall,
                     private Agent $agent,
                     private array $contextVariables,
                     private bool $debug
-                ) {}
+                ) {
+                }
 
                 public function run()
                 {
@@ -391,7 +379,7 @@ class Swarm
         }
 
         $results = Future\await($futures);
-        
+
         $messages = [];
         $mergedContextVariables = $contextVariables;
         $newAgent = null;
@@ -411,6 +399,43 @@ class Swarm
             'contextVariables' => $mergedContextVariables,
             'agent' => $newAgent,
         ];
+    }
+
+    /**
+     * Sets up the logger for the Swarm class.
+     *
+     * This method initializes the logger, creates the necessary directories,
+     * and configures the log handler based on the provided configuration.
+     *
+     * @param Config $config The configuration object containing logging settings.
+     *
+     * @throws LogDirectoryException If the log directory cannot be created or is invalid.
+     *
+     * @return void
+     */
+    private function setupLogger(): void
+    {
+        $this->logger = new Logger('swarm');
+        $logDir = getenv('LOG_DIR');
+
+        if (!$logDir) {
+            throw new LogDirectoryException('LOG_DIR option not set');
+        }
+
+        $fullLogPath = FileManager::root() . DIRECTORY_SEPARATOR . $logDir;
+        if (!is_dir($fullLogPath)) {
+            throw new LogDirectoryException("Invalid log directory path: $fullLogPath");
+        }
+
+        try {
+            $logFilePath = $fullLogPath . DIRECTORY_SEPARATOR . time() . DIRECTORY_SEPARATOR . 'swarm.log';
+            Amp\File\createDirectoryRecursively(dirname($logFilePath), 0755);
+            $handler = new StreamHandler(File\openFile($logFilePath, 'w'));
+            $handler->setFormatter(new ConsoleFormatter());
+            $this->logger->pushHandler($handler);
+        } catch (Throwable $e) {
+            throw new LogDirectoryException("Unable to create log directory: {$e->getMessage()}");
+        }
     }
 
     /**

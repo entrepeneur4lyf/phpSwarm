@@ -31,19 +31,21 @@ class SwarmToolsTest extends TestCase
         parent::tearDown();
     }
 
-    private function removeDirectory($dir) {
-        if (is_dir($dir)) { 
+    private function removeDirectory($dir)
+    {
+        if (is_dir($dir)) {
             $objects = scandir($dir);
-            foreach ($objects as $object) { 
-                if ($object != "." && $object != "..") { 
-                    if (is_dir($dir. DIRECTORY_SEPARATOR .$object) && !is_link($dir."/".$object))
+            foreach ($objects as $object) {
+                if ($object != "." && $object != "..") {
+                    if (is_dir($dir. DIRECTORY_SEPARATOR .$object) && !is_link($dir."/".$object)) {
                         $this->removeDirectory($dir. DIRECTORY_SEPARATOR .$object);
-                    else
-                        unlink($dir. DIRECTORY_SEPARATOR .$object); 
-                } 
+                    } else {
+                        unlink($dir. DIRECTORY_SEPARATOR .$object);
+                    }
+                }
             }
-            rmdir($dir); 
-        } 
+            rmdir($dir);
+        }
     }
 
     public function testListFiles()
@@ -52,7 +54,7 @@ class SwarmToolsTest extends TestCase
         file_put_contents($testFile, 'test content');
 
         $files = json_decode($this->swarmTools->listFiles($this->tempDir), true);
-        
+
         $this->assertContains('test.txt', $files);
     }
 
@@ -63,7 +65,7 @@ class SwarmToolsTest extends TestCase
         file_put_contents($testFile, $testContent);
 
         $content = $this->swarmTools->readFile($testFile);
-        
+
         $this->assertEquals($testContent, $content);
     }
 
@@ -97,7 +99,7 @@ class SwarmToolsTest extends TestCase
         $swarmTools->method('getHttpClient')->willReturn($client);
 
         $content = $swarmTools->retrieveDocumentFromURL("https://example.com");
-        
+
         $this->assertEquals($mockBody, $content);
     }
 
@@ -120,7 +122,7 @@ class SwarmToolsTest extends TestCase
 
         $savePath = $this->tempDir;
         $result = $swarmTools->retrieveDocumentFromURL("https://example.com/test.txt", $savePath);
-        
+
         $this->assertStringContainsString("File downloaded and saved successfully", $result);
         $this->assertFileExists($savePath . '/test.txt');
         $this->assertEquals($mockBody, file_get_contents($savePath . '/test.txt'));

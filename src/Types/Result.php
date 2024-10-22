@@ -6,7 +6,7 @@ namespace phpSwarm\Types;
 
 /**
  * Class Result
- * 
+ *
  * Represents the result of an operation in the Swarm system.
  * It contains a value, an optional agent, and context variables.
  */
@@ -23,5 +23,6 @@ class Result
         public string $value = "",
         public ?Agent $agent = null,
         public array $contextVariables = []
-    ) {}
+    ) {
+    }
 }

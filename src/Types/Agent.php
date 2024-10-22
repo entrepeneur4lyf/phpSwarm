@@ -8,7 +8,7 @@ use phpSwarm\Types\OpenAIModels;
 
 /**
  * Class Agent
- * 
+ *
  * Represents an agent in the Swarm system, with properties such as name, model, instructions, and functions.
  */
 class Agent

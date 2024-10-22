@@ -6,7 +6,7 @@ namespace phpSwarm\Types;
 
 /**
  * Class Response
- * 
+ *
  * Represents a response from the Swarm system, containing messages, agent information, and context variables.
  */
 class Response
@@ -22,5 +22,6 @@ class Response
         public array $messages = [],
         public ?Agent $agent = null,
         public array $contextVariables = []
-    ) {}
+    ) {
+    }
 }
